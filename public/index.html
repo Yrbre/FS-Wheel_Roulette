@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HUT 50 Tahun PT. TIFICO FIBER INDONESIA, TBK</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;800&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar__brand">
+        <span class="topbar__dot"> </span>
+        <h1>HUT 50 Tahun</h1>
+      </div>
+      <div class="topbar__stats">
+        <div class="stat">
+          <span class="stat__num" id="statParticipants">0</span>
+          <span class="stat__label">peserta tersisa</span>
+        </div>
+        <div class="stat">
+          <span class="stat__num" id="statWinners">0</span>
+          <span class="stat__label">sudah menang</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel wheel-panel">
+        <div class="wheel-frame">
+          <iframe
+            id="wheelFrame"
+            src="about:blank"
+            title="wheel-iframe"
+            allow="autoplay"
+          ></iframe>
+        </div>
+
+        <div class="controls">
+          <label class="controls__label" for="prizeSelect"
+            >Hadiah untuk ronde ini</label
+          >
+          <select id="prizeSelect"></select>
+
+          <div class="controls__row">
+            <button id="btnSpinOnce" class="btn btn--primary">Putar 1x</button>
+            <div class="spin-batch-group">
+              <button id="btnSpinBatch" class="btn btn--accent">
+                Putar Otomatis
+              </button>
+              <div class="spin-batch-input">
+                <label for="spinCount">Jumlah putaran:</label>
+                <select id="spinCount">
+                  <option value="1">1x</option>
+                  <option value="2">2x</option>
+                  <option value="3">3x</option>
+                  <option value="4">4x</option>
+                  <option value="5">5x</option>
+                  <option value="6">6x</option>
+                  <option value="7">7x</option>
+                  <option value="8">8x</option>
+                  <option value="9">9x</option>
+                  <option value="10" selected>10x</option>
+                </select>
+              </div>
+            </div>
+            <button id="btnReset" class="btn btn--ghost">Reset Undian</button>
+          </div>
+
+          <div class="progress" id="batchProgress" hidden>
+            <div class="progress__bar">
+              <div class="progress__fill" id="progressFill"></div>
+            </div>
+            <span id="progressLabel">Ronde 0 / 10</span>
+          </div>
+
+          <p class="status" id="statusMsg"></p>
+        </div>
+      </section>
+
+      <aside class="panel winners-panel">
+        <h2>Riwayat Pemenang</h2>
+        <ul id="winnersList" class="winners-list">
+          <li class="winners-empty">Belum ada pemenang.</li>
+        </ul>
+      </aside>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

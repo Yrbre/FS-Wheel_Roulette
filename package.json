@@ -1,0 +1,16 @@
+{
+  "name": "wheel-of-names-app",
+  "version": "1.0.0",
+  "description": "Aplikasi undian roda (Wheel of Names) dengan data dari database MySQL",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mysql2": "^3.11.0"
+  }
+}
