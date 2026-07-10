@@ -146,21 +146,17 @@ app.post("/api/spin-result", async (req, res) => {
 
     if (participants.length === 0) {
       await conn.rollback();
-      return res
-        .status(404)
-        .json({
-          error: `Peserta "${participant_name}" tidak ditemukan di database`,
-        });
+      return res.status(404).json({
+        error: `Peserta "${participant_name}" tidak ditemukan di database`,
+      });
     }
 
     const participant = participants[0];
     if (participant.has_won) {
       await conn.rollback();
-      return res
-        .status(409)
-        .json({
-          error: `${participant_name} sudah pernah menang, tidak bisa menang lagi`,
-        });
+      return res.status(409).json({
+        error: `${participant_name} sudah pernah menang, tidak bisa menang lagi`,
+      });
     }
 
     // Kunci baris hadiah, pastikan stok masih ada
@@ -226,6 +222,11 @@ app.post("/api/reset", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server berjalan di http://localhost:${PORT}`);
+const HOST = process.env.HOST || "0.0.0.0";
+
+app.listen(PORT, HOST, () => {
+  console.log(
+    `Server berjalan di http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`,
+  );
+  console.log(`Akses dari LAN: http://<IP-ANDA>:${PORT}`);
 });

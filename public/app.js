@@ -15,7 +15,13 @@ const els = {
   batchProgress: document.getElementById("batchProgress"),
   progressFill: document.getElementById("progressFill"),
   progressLabel: document.getElementById("progressLabel"),
+  overlayId: document.getElementById("overlayId"),
+  lastWinnerName: document.getElementById("lastWinnerName"), // badge pojok kanan bawah wheel
 };
+
+// Permanent overlay defaults (no UI controls)
+const OVERLAY_DEFAULT_X = 0;
+const OVERLAY_DEFAULT_Y = 0;
 
 let participants = []; // [{id, name}] - SEMUA peserta (1512+)
 let prizes = []; // [{id, name, stock}]
@@ -82,6 +88,12 @@ function addWinnerToList(name, prizeName) {
   els.winnersList.prepend(li);
 }
 
+// Update badge "Pemenang terakhir" di pojok kanan bawah wheel-frame
+function setLastWinnerBadge(name) {
+  if (!els.lastWinnerName) return;
+  els.lastWinnerName.textContent = name && name.trim() ? name : "-";
+}
+
 // ---------------------------------------------------------------------------
 // Fetch SEMUA participants dari backend (paginated) - support 1500+
 // ---------------------------------------------------------------------------
@@ -146,10 +158,13 @@ async function loadData() {
     if (winnersData.length === 0) {
       els.winnersList.innerHTML =
         '<li class="winners-empty">Belum ada pemenang.</li>';
+      setLastWinnerBadge("-"); // belum ada pemenang sama sekali
     } else {
       winnersData.forEach((w) =>
         addWinnerToList(w.participant_name, w.prize_name),
       );
+      // winnersData diasumsikan terurut dari yang terbaru -> tampilkan pemenang paling baru
+      setLastWinnerBadge(winnersData[0].participant_name);
     }
 
     // Load wheel dengan URL minimal (entries akan di-set via postMessage)
@@ -192,6 +207,63 @@ function waitForSpinResult() {
 }
 
 // ---------------------------------------------------------------------------
+// Overlay spin: show cycling first-5-letters-of-name while wheel animates
+// ---------------------------------------------------------------------------
+const SPIN_TIME_MS = 5000; // must match spinTime param in buildWheelUrl
+let overlayInterval = null;
+let overlayIndex = 0;
+
+// Ambil 5 huruf pertama dari kolom name, huruf besar semua, rapikan spasi
+function first5(name) {
+  if (!name) return "--";
+  return name.trim().slice(0, 5).toUpperCase();
+}
+
+function startOverlaySpin() {
+  if (!els.overlayId || participants.length === 0) return;
+  // rapidly cycle through participant names (5 huruf pertama) to simulate spinning
+  overlayIndex = Math.floor(Math.random() * participants.length);
+  els.overlayId.textContent = participants[overlayIndex]
+    ? first5(participants[overlayIndex].name)
+    : "--";
+
+  // do NOT rotate or move the overlay while spinning; keep it fixed
+  els.overlayId.classList.remove("spin-anim");
+  const ox = OVERLAY_DEFAULT_X;
+  const oy = OVERLAY_DEFAULT_Y;
+  els.overlayId.style.transform = `translate(${ox}px, ${oy}px)`;
+
+  overlayInterval = setInterval(() => {
+    overlayIndex = (overlayIndex + 1) % participants.length;
+    const p = participants[overlayIndex];
+    els.overlayId.textContent = p ? first5(p.name) : "--";
+  }, 80);
+}
+
+function stopOverlaySpin(finalName) {
+  if (!els.overlayId) return;
+  if (overlayInterval) {
+    clearInterval(overlayInterval);
+    overlayInterval = null;
+  }
+
+  // land on 5 huruf pertama nama pemenang (kalau diketahui)
+  if (finalName !== undefined && finalName !== null) {
+    els.overlayId.textContent = first5(finalName);
+  }
+  // reset rotation smoothly
+  const ox = OVERLAY_DEFAULT_X;
+  const oy = OVERLAY_DEFAULT_Y;
+  // keep overlay fixed at the translate offset
+  els.overlayId.style.transition = "transform 200ms ease-out";
+  els.overlayId.style.transform = `translate(${ox}px, ${oy}px)`;
+  setTimeout(() => {
+    els.overlayId.style.transition = "";
+    els.overlayId.classList.remove("spin-anim");
+  }, 700);
+}
+
+// ---------------------------------------------------------------------------
 // Satu kali putaran penuh: spin -> tangkap pemenang -> simpan ke DB -> update UI
 // ---------------------------------------------------------------------------
 async function spinOnceAndRecord(prizeId, roundNumber) {
@@ -199,8 +271,14 @@ async function spinOnceAndRecord(prizeId, roundNumber) {
     throw new Error("Semua peserta sudah pernah menang.");
 
   const resultPromise = waitForSpinResult();
+  // start overlay animation while wheel spins
+  try {
+    startOverlaySpin();
+  } catch (e) {
+    console.warn("overlay start failed", e);
+  }
   postToWheel({ name: "spin" });
-  const winnerName = await resultPromise;
+  const winnerName = await resultPromise; // <-- ini nama pemenang yang diambil dari event spinResult wheel
 
   const res = await fetch("/api/spin-result", {
     method: "POST",
@@ -217,6 +295,12 @@ async function spinOnceAndRecord(prizeId, roundNumber) {
   // Update state lokal: hapus pemenang dari daftar peserta di wheel
   participants = participants.filter((p) => p.name !== winnerName);
   postToWheel({ name: "removeWinner" });
+  // stop overlay dan tampilkan 5 huruf pertama nama pemenang
+  try {
+    stopOverlaySpin(winnerName);
+  } catch (e) {
+    console.warn("overlay stop failed", e);
+  }
 
   // Update stok hadiah lokal
   const prize = prizes.find((p) => p.id === Number(prizeId));
@@ -227,6 +311,7 @@ async function spinOnceAndRecord(prizeId, roundNumber) {
   }
 
   addWinnerToList(winnerName, prizeName);
+  setLastWinnerBadge(winnerName); // <-- tampilkan nama pemenang terbaru di pojok kanan bawah wheel
   refreshStats();
 
   return { winnerName, prizeName };
@@ -254,8 +339,6 @@ els.btnSpinOnce.addEventListener("click", async () => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Tombol: Putar Otomatis 10x (mempersingkat proses undian banyak pemenang)
 // ---------------------------------------------------------------------------
 // Tombol: Putar Otomatis (dinamis sesuai pilihan user 1-10x)
 // ---------------------------------------------------------------------------
@@ -324,7 +407,7 @@ els.btnReset.addEventListener("click", async () => {
   try {
     const res = await fetch("/api/reset", { method: "POST" });
     if (!res.ok) throw new Error("Gagal reset");
-    await loadData();
+    await loadData(); // loadData() akan mengembalikan badge ke "-" karena riwayat pemenang sudah kosong
     setStatus("Undian sudah direset.");
   } catch (err) {
     setStatus(err.message, true);
@@ -342,3 +425,8 @@ function toggleButtons(enabled) {
 }
 
 loadData().catch((err) => setStatus("Gagal memuat data: " + err.message, true));
+
+// Apply permanent overlay transform (no UI inputs)
+if (els.overlayId) {
+  els.overlayId.style.transform = `translate(${OVERLAY_DEFAULT_X}px, ${OVERLAY_DEFAULT_Y}px)`;
+}

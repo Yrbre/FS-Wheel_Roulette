@@ -14,8 +14,12 @@
   <body>
     <header class="topbar">
       <div class="topbar__brand">
-        <span class="topbar__dot"> </span>
-        <h1>Undian Hadiah</h1>
+        <img
+          src="50th_Tifico.png"
+          alt="LOGO TIFICO"
+          style="width: 70px; height: 70px"
+        />
+        <h1>Undian Doorprize HUT Tifico Ke 50</h1>
       </div>
       <div class="topbar__stats">
         <div class="stat">
@@ -38,6 +42,17 @@
             title="wheel-iframe"
             allow="autoplay"
           ></iframe>
+
+          <!-- Bulatan ID yang berputar di tengah wheel -->
+          <div class="wheel-overlay" id="wheelOverlay">
+            <div class="overlay-id" id="overlayId">--</div>
+          </div>
+
+          <!-- Badge nama pemenang terakhir, dikunci di pojok kanan bawah frame wheel -->
+          <div class="last-winner-badge" id="lastWinnerBadge">
+            <span class="last-winner-badge__label">Pemenang terakhir</span>
+            <span class="last-winner-badge__name" id="lastWinnerName">-</span>
+          </div>
         </div>
 
         <div class="controls">

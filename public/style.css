@@ -76,8 +76,8 @@ body {
   display: grid;
   grid-template-columns: 1.4fr 0.8fr;
   gap: 24px;
-  padding: 28px 32px 40px;
-  max-width: 1180px;
+  padding: 28px 20px 40px;
+  max-width: 1600px;
   margin: 0 auto;
 }
 
@@ -102,6 +102,7 @@ body {
   overflow: hidden;
   background: #0e1024;
   margin: 0 auto;
+  position: relative;
 }
 
 .wheel-frame iframe {
@@ -109,6 +110,86 @@ body {
   height: 100%;
   border: 0;
   display: block;
+  position: relative;
+  z-index: 1;
+}
+
+/* Bulatan ID di tengah wheel yang berputar-putar selama animasi spin */
+.wheel-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.overlay-id {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  border: 2px solid rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--gold-soft);
+  font-size: 18px;
+  text-align: center;
+  transform-origin: center center;
+}
+
+.overlay-id.spin-anim {
+  transition: transform 0.2s linear;
+}
+
+/* Badge nama pemenang terakhir - dikunci di pojok kanan bawah .wheel-frame,
+   terpisah dari overlay ID di tengah supaya posisinya konsisten. */
+.last-winner-badge {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  max-width: 70%;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(14, 16, 36, 0.82);
+  border: 1px solid rgba(242, 184, 7, 0.35);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+  text-align: right;
+}
+
+.last-winner-badge__label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.last-winner-badge__name {
+  font-family: "Sora", sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--gold-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
+@media (max-width: 500px) {
+  .last-winner-badge__name {
+    max-width: 160px;
+  }
 }
 
 .controls {
