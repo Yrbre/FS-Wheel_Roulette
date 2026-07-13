@@ -75,6 +75,7 @@ body {
 .layout {
   display: grid;
   grid-template-columns: 1.4fr 0.8fr;
+  align-items: stretch; /* kedua kartu sama tinggi -> batas bawah sejajar */
   gap: 24px;
   padding: 28px 20px 40px;
   max-width: 1600px;
@@ -97,7 +98,7 @@ body {
 .wheel-frame {
   width: 100%;
   aspect-ratio: 1 / 1;
-  max-height: 560px;
+  max-height: 60vh;
   border-radius: var(--radius);
   overflow: hidden;
   background: #0e1024;
@@ -158,8 +159,8 @@ body {
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  max-width: 70%;
-  padding: 8px 14px;
+  max-width: 100%;
+  padding: 8px 12px;
   border-radius: 12px;
   background: rgba(14, 16, 36, 0.82);
   border: 1px solid rgba(242, 184, 7, 0.35);
@@ -177,13 +178,13 @@ body {
 
 .last-winner-badge__name {
   font-family: "Sora", sans-serif;
-  font-size: 15px;
+  font-size: 20px;
   font-weight: 800;
   color: var(--gold-soft);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 300px;
+  max-width: 70vh;
 }
 
 @media (max-width: 500px) {
@@ -239,7 +240,7 @@ select {
   align-items: center;
   gap: 8px;
   background: rgba(255, 255, 255, 0.04);
-  padding: 8px 12px;
+  padding: 40px 12px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -259,7 +260,7 @@ select {
   margin: 0;
   padding: 6px 8px;
   min-width: 70px;
-  font-size: 13px;
+  font-size: 20px;
 }
 
 @media (max-width: 860px) {
@@ -287,10 +288,10 @@ select {
 .btn {
   flex: 1;
   min-width: 140px;
-  padding: 12px 16px;
+  padding: 40px 16px;
   border-radius: 10px;
   border: none;
-  font-size: 14px;
+  font-size: 32px;
   font-weight: 600;
   cursor: pointer;
   transition:
@@ -362,14 +363,42 @@ select {
   margin: 0 0 14px;
 }
 
+/* Panel pemenang: flex column supaya daftarnya bisa memanjang mengisi kartu
+   sampai batas bawah, sejajar dengan kartu roda di kiri. */
+/* Pembungkus kartu pemenang.
+   Tingginya ditentukan oleh baris grid (yaitu setinggi kartu roda di kiri),
+   karena isi kartu di dalamnya diposisikan ABSOLUT sehingga tidak ikut
+   menghitung tinggi. Inilah yang membuat batas bawah kedua kartu SELALU
+   sejajar berapa pun banyaknya pemenang. */
+.winners-wrap {
+  position: relative;
+  min-height: 0;
+}
+
+.winners-panel {
+  position: absolute;
+  inset: 0; /* isi penuh pembungkus: atas, kanan, bawah, kiri */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden; /* kunci isi -> yang scroll adalah .winners-list di dalam */
+}
+
+.winners-panel h2 {
+  flex: 0 0 auto;
+}
+
 .winners-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 6px 0 0; /* ruang kecil untuk scrollbar */
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 620px;
+  /* Isi seluruh sisa tinggi kartu; batasnya = tinggi kartu itu sendiri,
+     yang sama dengan kartu kiri. Jadi tidak ada ruang kosong di bawah. */
+  flex: 1 1 auto;
+  min-height: 0; /* WAJIB: tanpa ini overflow-y tidak jalan di dalam flex */
   overflow-y: auto;
 }
 
@@ -393,4 +422,152 @@ select {
 .winners-empty {
   color: var(--text-dim);
   justify-content: center;
+}
+
+/* --- Tombol hapus pemenang (batalkan kemenangan) --------------------------- */
+.winners-list li {
+  gap: 10px;
+}
+
+.winners-list li .w-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.winners-list li .w-info .w-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.winners-list li .w-info .w-prize {
+  color: var(--gold-soft);
+  font-size: 12px;
+}
+
+.w-delete {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 107, 107, 0.35);
+  background: rgba(255, 107, 107, 0.12);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.12s ease,
+    transform 0.12s ease;
+}
+
+.w-delete:hover {
+  background: rgba(255, 107, 107, 0.28);
+}
+
+.w-delete:active {
+  transform: scale(0.92);
+}
+
+/* --- Pemisah / header grup per doorprize di daftar pemenang ---------------- */
+.winners-group {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  background: transparent !important;
+  padding: 14px 2px 6px !important;
+  margin-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* grup pertama tidak perlu garis atas */
+.winners-list .winners-group:first-child {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 2px !important;
+}
+
+.winners-group__title {
+  font-family: "Sora", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+}
+
+.winners-group__count {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.winner-row {
+  margin-left: 8px;
+}
+
+/* opsi hadiah yang stoknya habis */
+#prizeSelect option:disabled {
+  color: var(--text-dim);
+}
+
+/* Di layar kecil layout jadi 1 kolom, tinggi kartu mengikuti isi.
+   Kembalikan batas tinggi agar daftar tidak memanjang tak terkendali. */
+@media (max-width: 860px) {
+  /* Layout 1 kolom: kembalikan ke aliran normal, kartu setinggi isinya */
+  .winners-wrap {
+    position: static;
+  }
+
+  .winners-panel {
+    position: static;
+    inset: auto;
+  }
+
+  .winners-list {
+    flex: 0 1 auto;
+    max-height: 60vh;
+  }
+}
+
+/* --- Scrollbar di dalam kartu daftar pemenang ----------------------------- */
+.winners-list {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.winners-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.winners-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.winners-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+}
+
+.winners-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* Catatan jumlah pemenang lama yang tidak ditampilkan */
+.winners-note {
+  justify-content: center !important;
+  background: transparent !important;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-style: italic;
+  padding: 12px 8px !important;
+  text-align: center;
 }

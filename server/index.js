@@ -9,6 +9,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "public")));
 
+// Normalisasi status supaya "Grandprize", "grandprize", " PROPER " tetap dikenali
+const normStatus = (s) =>
+  String(s || "")
+    .trim()
+    .toUpperCase();
+
 // ---------------------------------------------------------------------------
 // GET /api/stats -> info jumlah peserta tersisa & pemenang
 // ---------------------------------------------------------------------------
@@ -17,6 +23,7 @@ app.get("/api/stats", async (req, res) => {
     const [statsResult] = await pool.query(`
       SELECT 
         (SELECT COUNT(*) FROM participants WHERE has_won = 0) AS available_count,
+        (SELECT COUNT(*) FROM participants WHERE has_won = 0 AND UPPER(TRIM(status)) = 'PROPER') AS available_proper_count,
         (SELECT COUNT(*) FROM winners) AS winners_count
     `);
     res.json(statsResult[0]);
@@ -37,7 +44,7 @@ app.get("/api/participants", async (req, res) => {
     const offset = (page - 1) * limit;
 
     const [rows] = await pool.query(
-      "SELECT id, name FROM participants WHERE has_won = 0 ORDER BY name LIMIT ? OFFSET ?",
+      "SELECT id, name, status FROM participants WHERE has_won = 0 ORDER BY name LIMIT ? OFFSET ?",
       [limit, offset],
     );
 
@@ -67,7 +74,7 @@ app.get("/api/participants", async (req, res) => {
 app.get("/api/prizes", async (req, res) => {
   try {
     const [rows] = await pool.query(
-      "SELECT id, name, stock FROM prizes WHERE stock > 0 ORDER BY id",
+      "SELECT id, name, stock, status FROM prizes WHERE stock > 0 ORDER BY id",
     );
     res.json(rows);
   } catch (err) {
@@ -124,6 +131,9 @@ app.get("/api/winners", async (req, res) => {
 // Mencatat hasil satu putaran wheel. Memakai transaction + row lock supaya
 // aman kalau ada beberapa request nyaris bersamaan (mencegah 1 orang
 // tercatat menang 2x, dan mencegah stok hadiah minus).
+//
+// Juga memvalidasi eligibility: hadiah GRANDPRIZE hanya boleh dimenangkan
+// peserta berstatus PROPER. Ini benteng terakhir kalau frontend bermasalah.
 // ---------------------------------------------------------------------------
 app.post("/api/spin-result", async (req, res) => {
   const { participant_name, prize_id, round_number } = req.body;
@@ -139,8 +149,9 @@ app.post("/api/spin-result", async (req, res) => {
     await conn.beginTransaction();
 
     // Cari peserta berdasarkan nama, kunci baris agar tidak dibaca proses lain
+    // (status ikut di-SELECT untuk validasi GRANDPRIZE di bawah)
     const [participants] = await conn.query(
-      "SELECT id, has_won FROM participants WHERE name = ? FOR UPDATE",
+      "SELECT id, has_won, status FROM participants WHERE name = ? FOR UPDATE",
       [participant_name],
     );
 
@@ -160,8 +171,9 @@ app.post("/api/spin-result", async (req, res) => {
     }
 
     // Kunci baris hadiah, pastikan stok masih ada
+    // (status ikut di-SELECT untuk validasi GRANDPRIZE di bawah)
     const [prizes] = await conn.query(
-      "SELECT id, stock FROM prizes WHERE id = ? FOR UPDATE",
+      "SELECT id, stock, status FROM prizes WHERE id = ? FOR UPDATE",
       [prize_id],
     );
 
@@ -174,8 +186,19 @@ app.post("/api/spin-result", async (req, res) => {
       return res.status(409).json({ error: "Stok hadiah ini sudah habis" });
     }
 
+    // VALIDASI ELIGIBILITY: GRANDPRIZE hanya untuk peserta PROPER
+    if (
+      normStatus(prizes[0].status) === "GRANDPRIZE" &&
+      normStatus(participant.status) !== "PROPER"
+    ) {
+      await conn.rollback();
+      return res.status(403).json({
+        error: `${participant_name} berstatus ${participant.status}, tidak memenuhi syarat untuk Grand Prize (hanya PROPER)`,
+      });
+    }
+
     // Catat pemenang
-    await conn.query(
+    const [insertResult] = await conn.query(
       "INSERT INTO winners (participant_id, prize_id, round_number) VALUES (?, ?, ?)",
       [participant.id, prize_id, round_number || 1],
     );
@@ -189,11 +212,78 @@ app.post("/api/spin-result", async (req, res) => {
     ]);
 
     await conn.commit();
-    res.json({ success: true, participant_id: participant.id });
+    res.json({
+      success: true,
+      participant_id: participant.id,
+      winner_id: insertResult.insertId, // dipakai frontend untuk tombol hapus
+    });
   } catch (err) {
     await conn.rollback();
     console.error(err);
     res.status(500).json({ error: "Gagal menyimpan hasil undian" });
+  } finally {
+    conn.release();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/winners/:id -> batalkan SATU pemenang
+// Efeknya (dalam satu transaction):
+//   1. Baris di tabel winners dihapus
+//   2. Stok hadiah dikembalikan +1 (tidak melebihi original_stock)
+//   3. Peserta dikembalikan ke daftar undian (has_won = 0) supaya bisa ikut lagi
+// ---------------------------------------------------------------------------
+app.delete("/api/winners/:id", async (req, res) => {
+  const winnerId = parseInt(req.params.id, 10);
+  if (!winnerId) {
+    return res.status(400).json({ error: "ID pemenang tidak valid" });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // Ambil & kunci baris pemenang yang akan dihapus
+    const [rows] = await conn.query(
+      "SELECT id, participant_id, prize_id FROM winners WHERE id = ? FOR UPDATE",
+      [winnerId],
+    );
+
+    if (rows.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: "Data pemenang tidak ditemukan" });
+    }
+
+    const winner = rows[0];
+
+    // Hapus baris pemenang
+    await conn.query("DELETE FROM winners WHERE id = ?", [winnerId]);
+
+    // Kembalikan peserta ke daftar undian
+    await conn.query("UPDATE participants SET has_won = 0 WHERE id = ?", [
+      winner.participant_id,
+    ]);
+
+    // Kembalikan stok hadiah (+1).
+    // CATATAN: sengaja TIDAK memakai LEAST(stock + 1, original_stock) supaya
+    // tidak bergantung pada kolom `original_stock` yang mungkin tidak ada di
+    // tabel prizes Anda. Stok tidak akan kelebihan karena setiap +1 di sini
+    // selalu berpasangan dengan tepat satu -1 saat pemenang dicatat.
+    await conn.query("UPDATE prizes SET stock = stock + 1 WHERE id = ?", [
+      winner.prize_id,
+    ]);
+
+    await conn.commit();
+    res.json({ success: true, deleted_winner_id: winnerId });
+  } catch (err) {
+    await conn.rollback();
+    console.error("DELETE /api/winners gagal:", err);
+    // kirim pesan asli MySQL supaya penyebabnya kelihatan di frontend
+    res
+      .status(500)
+      .json({
+        error: `Gagal menghapus pemenang: ${err.sqlMessage || err.message}`,
+      });
   } finally {
     conn.release();
   }

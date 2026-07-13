@@ -50,7 +50,7 @@
 
           <!-- Badge nama pemenang terakhir, dikunci di pojok kanan bawah frame wheel -->
           <div class="last-winner-badge" id="lastWinnerBadge">
-            <span class="last-winner-badge__label">Pemenang terakhir</span>
+            <span class="last-winner-badge__label">Pemenang terpilih</span>
             <span class="last-winner-badge__name" id="lastWinnerName">-</span>
           </div>
         </div>
@@ -62,7 +62,9 @@
           <select id="prizeSelect"></select>
 
           <div class="controls__row">
-            <button id="btnSpinOnce" class="btn btn--primary">Putar 1x</button>
+            <button id="btnSpinOnce" class="btn btn--primary" hidden>
+              Putar 1x
+            </button>
             <div class="spin-batch-group">
               <button id="btnSpinBatch" class="btn btn--accent">
                 Putar Otomatis
@@ -97,11 +99,18 @@
         </div>
       </section>
 
-      <aside class="panel winners-panel">
-        <h2>Riwayat Pemenang</h2>
-        <ul id="winnersList" class="winners-list">
-          <li class="winners-empty">Belum ada pemenang.</li>
-        </ul>
+      <!-- Pembungkus: tingginya ditentukan oleh kartu kiri (grid stretch).
+           Kartu di dalamnya diposisikan absolut mengisi pembungkus, sehingga
+           isi daftar TIDAK ikut menambah tinggi kartu -> batas bawah kedua
+           kartu selalu sejajar, dan daftar yang panjang akan di-scroll
+           di dalam kartu. -->
+      <aside class="winners-wrap">
+        <div class="panel winners-panel">
+          <h2>Riwayat Pemenang</h2>
+          <ul id="winnersList" class="winners-list">
+            <li class="winners-empty">Belum ada pemenang.</li>
+          </ul>
+        </div>
       </aside>
     </main>
 

@@ -1,6 +1,10 @@
 const WHEEL_ORIGIN = "https://wheelofnames.com";
 const BATCH_SIZE = 10; // jumlah putaran otomatis sekali klik
 
+// Maksimal pemenang yang DITAMPILKAN di panel kanan (yang terbaru dulu),
+// supaya tidak perlu scroll jauh. Data lama tetap tersimpan di database.
+const MAX_WINNERS_DISPLAYED = 53;
+
 const els = {
   frame: document.getElementById("wheelFrame"),
   prizeSelect: document.getElementById("prizeSelect"),
@@ -23,8 +27,9 @@ const els = {
 const OVERLAY_DEFAULT_X = 0;
 const OVERLAY_DEFAULT_Y = 0;
 
-let participants = []; // [{id, name}] - SEMUA peserta (1512+)
-let prizes = []; // [{id, name, stock}]
+let participants = []; // [{id, name, status}] - peserta yang belum menang
+let prizes = []; // [{id, name, stock, status}]
+let winnersLog = []; // [{id, participant_name, prize_name}] - urut TERBARU dulu
 let isSpinning = false;
 
 // ---------------------------------------------------------------------------
@@ -43,13 +48,67 @@ function buildWheelUrl(names) {
 }
 
 // Set entries ke wheel via postMessage (no URL limit, support 1500+ participants)
+//
+// PENTING: JANGAN pernah "return" diam-diam saat daftar kosong. Kalau kita tidak
+// mengirim setEntries, roda akan tetap memakai entries LAMA (yang bisa berisi
+// peserta LS) -> peserta LS bisa keluar sebagai pemenang Grand Prize.
 function setWheelEntries(names) {
-  if (!names || names.length === 0) return;
+  const list = Array.isArray(names) ? names.filter(Boolean) : [];
   postToWheel({
     name: "setEntries",
-    entries: names,
+    // kalau benar-benar kosong, kirim placeholder supaya roda kosong secara
+    // eksplisit, bukan menyisakan daftar lama
+    entries: list.length > 0 ? list : ["(tidak ada peserta)"],
   });
 }
+
+// ---------------------------------------------------------------------------
+// Aturan eligibility: GRANDPRIZE hanya untuk peserta status PROPER,
+// COMMON boleh semua peserta yang belum menang.
+//
+// PENTING: status dinormalisasi (trim + UPPERCASE) supaya nilai di database
+// seperti "Grandprize", "grandprize", "Proper", " PROPER " tetap dikenali.
+// Tanpa ini, "Grandprize" !== "GRANDPRIZE" -> hadiah dianggap COMMON -> LS
+// ikut masuk roda dan bisa menang Grand Prize.
+// ---------------------------------------------------------------------------
+function normStatus(s) {
+  return String(s || "")
+    .trim()
+    .toUpperCase();
+}
+
+function isGrandPrize(prize) {
+  return prize && normStatus(prize.status) === "GRANDPRIZE";
+}
+
+function isProper(participant) {
+  return normStatus(participant.status) === "PROPER";
+}
+
+function getEligiblePool(prizeId) {
+  const prize = prizes.find((p) => p.id === Number(prizeId));
+  if (!prize) return [];
+
+  if (isGrandPrize(prize)) {
+    return participants.filter(isProper);
+  }
+  return participants; // COMMON -> semua peserta (has_won=0) boleh ikut
+}
+
+// Rebuild isi wheel sesuai hadiah yang sedang dipilih saat ini
+function refreshWheelForSelectedPrize() {
+  const prizeId = els.prizeSelect.value;
+  if (!prizeId) return;
+  const eligible = getEligiblePool(prizeId);
+  setWheelEntries(eligible.map((p) => p.name));
+  setStatus(``);
+}
+
+// Setiap kali user ganti pilihan hadiah, roda di-rebuild sesuai eligibility
+els.prizeSelect.addEventListener("change", () => {
+  if (isSpinning) return;
+  refreshWheelForSelectedPrize();
+});
 
 function postToWheel(message) {
   els.frame.contentWindow.postMessage(message, WHEEL_ORIGIN);
@@ -61,31 +120,174 @@ function setStatus(msg, isError = false) {
 }
 
 function refreshStats() {
-  // Display total participants and winners count
+  // Hitung dari data, bukan dari jumlah <li>, karena daftar pemenang kini
+  // berisi header grup per hadiah yang tidak boleh ikut terhitung.
   els.statParticipants.textContent = participants.length || 0;
-  els.statWinners.textContent = document.querySelectorAll(
-    ".winners-list li:not(.winners-empty)",
-  ).length;
+  els.statWinners.textContent = winnersLog.length;
 }
 
 function refreshPrizeSelectStock(prizeId, newStock) {
   const opt = els.prizeSelect.querySelector(`option[value="${prizeId}"]`);
-  if (opt) {
-    if (newStock <= 0) {
-      opt.remove();
-    } else {
-      opt.textContent = `${opt.dataset.name} (sisa ${newStock})`;
-    }
+  if (!opt) return;
+
+  if (newStock <= 0) {
+    // JANGAN dihapus: kalau opsi dihapus, browser melompat ke opsi lain secara
+    // tak terduga dan perpindahan hadiah jadi kacau. Cukup dinonaktifkan.
+    opt.textContent = `${opt.dataset.name} (habis)`;
+    opt.disabled = true;
+  } else {
+    opt.textContent = `${opt.dataset.name} (sisa ${newStock})`;
+    opt.disabled = false;
   }
 }
 
-function addWinnerToList(name, prizeName) {
-  const emptyMsg = els.winnersList.querySelector(".winners-empty");
-  if (emptyMsg) emptyMsg.remove();
+// ---------------------------------------------------------------------------
+// Render ulang daftar pemenang, DIKELOMPOKKAN per hadiah.
+// Setiap kali hadiah berganti (mis. Doorprize 8 -> Doorprize 7) disisipkan
+// header pemisah, sehingga ada "gap" visual yang jelas antar doorprize.
+// ---------------------------------------------------------------------------
+function renderWinnersList() {
+  els.winnersList.innerHTML = "";
 
+  if (winnersLog.length === 0) {
+    els.winnersList.innerHTML =
+      '<li class="winners-empty">Belum ada pemenang.</li>';
+    return;
+  }
+
+  // Hanya tampilkan N pemenang TERBARU supaya tidak perlu scroll jauh
+  const shown = winnersLog.slice(0, MAX_WINNERS_DISPLAYED);
+  const hiddenCount = winnersLog.length - shown.length;
+
+  let currentPrize = null;
+
+  shown.forEach((w) => {
+    // Hadiah berganti -> sisipkan header pemisah
+    if (w.prize_name !== currentPrize) {
+      currentPrize = w.prize_name;
+
+      const header = document.createElement("li");
+      header.className = "winners-group";
+      const title = document.createElement("span");
+      title.className = "winners-group__title";
+      title.textContent = currentPrize;
+      const count = document.createElement("span");
+      count.className = "winners-group__count";
+      // hitung dari SELURUH data, bukan hanya yang ditampilkan
+      count.textContent =
+        winnersLog.filter((x) => x.prize_name === currentPrize).length +
+        " pemenang";
+      header.appendChild(title);
+      header.appendChild(count);
+      els.winnersList.appendChild(header);
+    }
+
+    els.winnersList.appendChild(buildWinnerRow(w));
+  });
+
+  // Catatan kalau ada pemenang lama yang tidak ditampilkan
+  if (hiddenCount > 0) {
+    const note = document.createElement("li");
+    note.className = "winners-note";
+    note.textContent = `+${hiddenCount} pemenang sebelumnya tidak ditampilkan (menampilkan ${MAX_WINNERS_DISPLAYED} terbaru).`;
+    els.winnersList.appendChild(note);
+  }
+}
+
+// Bangun satu baris pemenang (nama + tombol hapus)
+function buildWinnerRow(w) {
   const li = document.createElement("li");
-  li.innerHTML = `<span class="w-name">${name}</span><span class="w-prize">${prizeName}</span>`;
-  els.winnersList.prepend(li);
+  li.className = "winner-row";
+  li.dataset.winnerId = w.id;
+
+  const info = document.createElement("div");
+  info.className = "w-info";
+  const nameEl = document.createElement("span");
+  nameEl.className = "w-name";
+  nameEl.textContent = w.participant_name;
+  info.appendChild(nameEl);
+
+  const btn = document.createElement("button");
+  btn.className = "w-delete";
+  btn.type = "button";
+  btn.title = "Batalkan pemenang ini";
+  btn.textContent = "\u2715";
+  btn.addEventListener("click", () =>
+    deleteWinner(w.id, w.participant_name, w.prize_name),
+  );
+
+  li.appendChild(info);
+  li.appendChild(btn);
+  return li;
+}
+
+// Tambah pemenang baru ke paling atas, lalu render ulang (agar grouping benar)
+function addWinnerToList(name, prizeName, winnerId) {
+  winnersLog.unshift({
+    id: winnerId,
+    participant_name: name,
+    prize_name: prizeName,
+  });
+  renderWinnersList();
+}
+
+// ---------------------------------------------------------------------------
+// Hapus SATU pemenang: stok hadiah dikembalikan, peserta bisa ikut undian lagi
+// ---------------------------------------------------------------------------
+async function deleteWinner(winnerId, name, prizeName) {
+  if (isSpinning) {
+    setStatus("Tunggu sampai putaran selesai sebelum menghapus pemenang.");
+    return;
+  }
+  if (!winnerId) {
+    // Ini terjadi kalau pemenang dicatat saat server BELUM mengirim winner_id.
+    // Muat ulang dari server supaya barisnya dapat ID, lalu minta user klik lagi.
+    console.warn("Baris pemenang tanpa ID, memuat ulang data dari server...");
+    setStatus("Menyegarkan data pemenang... silakan klik hapus sekali lagi.");
+    await loadData();
+    return;
+  }
+
+  const ok = confirm(
+    `Batalkan kemenangan "${name}" (${prizeName})?\n\n` +
+      `Stok hadiah akan dikembalikan +1 dan peserta ini bisa ikut undian lagi.`,
+  );
+  if (!ok) return;
+
+  toggleButtons(false);
+  setStatus(`Menghapus pemenang "${name}"...`);
+
+  try {
+    const res = await fetch(`/api/winners/${winnerId}`, { method: "DELETE" });
+
+    if (!res.ok) {
+      // 404 di sini biasanya berarti ROUTE-nya belum ada di server
+      // (server belum di-restart / index.js belum diganti), bukan datanya hilang.
+      const data = await res.json().catch(() => null);
+      console.error("DELETE gagal:", res.status, res.statusText, data);
+
+      if (res.status === 404 && !data) {
+        throw new Error(
+          "Endpoint DELETE /api/winners/:id tidak ditemukan. " +
+            "Pastikan server/index.js sudah diperbarui dan server sudah di-restart.",
+        );
+      }
+      throw new Error(
+        (data && data.error) || `Gagal menghapus pemenang (HTTP ${res.status})`,
+      );
+    }
+
+    // Muat ulang semua data: peserta, stok hadiah, riwayat, dan isi roda
+    await loadData();
+    setStatus(
+      `Kemenangan "${name}" dibatalkan. Stok ${prizeName} dikembalikan.`,
+    );
+  } catch (err) {
+    console.error(err);
+    setStatus(err.message, true);
+  } finally {
+    toggleButtons(true);
+  }
 }
 
 // Update badge "Pemenang terakhir" di pojok kanan bawah wheel-frame
@@ -153,35 +355,73 @@ async function loadData() {
       )
       .join("");
 
-    // Setup winners list
-    els.winnersList.innerHTML = "";
-    if (winnersData.length === 0) {
-      els.winnersList.innerHTML =
-        '<li class="winners-empty">Belum ada pemenang.</li>';
-      setLastWinnerBadge("-"); // belum ada pemenang sama sekali
-    } else {
-      winnersData.forEach((w) =>
-        addWinnerToList(w.participant_name, w.prize_name),
-      );
-      // winnersData diasumsikan terurut dari yang terbaru -> tampilkan pemenang paling baru
-      setLastWinnerBadge(winnersData[0].participant_name);
-    }
+    // Setup winners list (dikelompokkan per hadiah)
+    // winnersData dari backend sudah urut TERBARU dulu (ORDER BY w.id DESC)
+    winnersLog = winnersData.map((w) => ({
+      id: w.id,
+      participant_name: w.participant_name,
+      prize_name: w.prize_name,
+    }));
+    renderWinnersList();
+
+    setLastWinnerBadge(
+      winnersLog.length > 0 ? winnersLog[0].participant_name : "-",
+    );
 
     // Load wheel dengan URL minimal (entries akan di-set via postMessage)
     els.frame.src = buildWheelUrl();
 
-    // Tunggu frame siap, kemudian set semua entries sekali saja
+    // Tunggu frame siap, kemudian set entries sesuai hadiah yang terpilih (default)
     setTimeout(() => {
-      setWheelEntries(participants.map((p) => p.name));
-      setStatus(
-        `✅ Ready! ${participants.length} participants loaded ke wheel`,
-      );
+      refreshWheelForSelectedPrize();
+      setStatus(`✅ Ready! participants loaded ke wheel`);
     }, 800);
 
     refreshStats();
+    debugStatuses(); // cetak diagnosa status ke console browser
   } catch (err) {
     console.error("Error loading data:", err);
     setStatus("Gagal memuat data: " + err.message, true);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DIAGNOSA: buka Console browser (F12) untuk memastikan kolom `status` benar-
+// benar terkirim dari backend dan nilainya seperti apa. Kalau `status` muncul
+// `undefined`, berarti query SELECT di backend belum menyertakan kolom status.
+// ---------------------------------------------------------------------------
+function debugStatuses() {
+  const prizeInfo = prizes.map((p) => ({
+    id: p.id,
+    name: p.name,
+    status_asli: p.status,
+    terdeteksi_grandprize: isGrandPrize(p),
+  }));
+  console.table(prizeInfo);
+
+  const counts = {};
+  participants.forEach((p) => {
+    const k = String(p.status);
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  console.log("Jumlah peserta per nilai status:", counts);
+  console.log(
+    "Total peserta PROPER terdeteksi:",
+    participants.filter(isProper).length,
+  );
+
+  if (participants.length && participants[0].status === undefined) {
+    console.error(
+      "MASALAH: kolom `status` TIDAK ada di response /api/participants. " +
+        "Tambahkan `status` ke SELECT di backend.",
+    );
+  }
+  if (prizes.length && prizes[0].status === undefined) {
+    console.error(
+      "MASALAH: kolom `status` TIDAK ada di response /api/prizes. " +
+        "Tambahkan `status` ke SELECT di backend. Akibatnya semua hadiah dianggap COMMON " +
+        "dan peserta LS bisa memenangkan Grand Prize.",
+    );
   }
 }
 
@@ -211,7 +451,6 @@ function waitForSpinResult() {
 // ---------------------------------------------------------------------------
 const SPIN_TIME_MS = 5000; // must match spinTime param in buildWheelUrl
 let overlayInterval = null;
-let overlayIndex = 0;
 
 // Ambil 5 huruf pertama dari kolom name, huruf besar semua, rapikan spasi
 function first5(name) {
@@ -220,23 +459,41 @@ function first5(name) {
 }
 
 function startOverlaySpin() {
-  if (!els.overlayId || participants.length === 0) return;
-  // rapidly cycle through participant names (5 huruf pertama) to simulate spinning
-  overlayIndex = Math.floor(Math.random() * participants.length);
-  els.overlayId.textContent = participants[overlayIndex]
-    ? first5(participants[overlayIndex].name)
-    : "--";
+  if (!els.overlayId) return;
 
-  // do NOT rotate or move the overlay while spinning; keep it fixed
+  // Ambil pool yang sedang eligible untuk hadiah terpilih (PROPER saja saat
+  // GRANDPRIZE), supaya nama yang muter-muter konsisten dengan calon pemenang.
+  const pool = getEligiblePool(els.prizeSelect.value);
+  if (!pool || pool.length === 0) return;
+
+  let lastShown = null;
+
+  // Ambil satu nama ACAK dari pool. Hindari menampilkan teks yang sama dua kali
+  // beruntun supaya perubahannya kelihatan jelas (banyak nama berbagi 5 huruf
+  // awal yang sama, tanpa ini overlay bisa terlihat "diam"/seolah berpola).
+  const pickRandom = () => {
+    let text;
+    let tries = 0;
+    do {
+      const p = pool[Math.floor(Math.random() * pool.length)];
+      text = first5(p.name);
+      tries++;
+    } while (text === lastShown && tries < 5 && pool.length > 1);
+    lastShown = text;
+    return text;
+  };
+
+  els.overlayId.textContent = pickRandom();
+
+  // jangan geser/putar overlay selama spin; biarkan tetap di posisinya
   els.overlayId.classList.remove("spin-anim");
   const ox = OVERLAY_DEFAULT_X;
   const oy = OVERLAY_DEFAULT_Y;
   els.overlayId.style.transform = `translate(${ox}px, ${oy}px)`;
 
+  // setiap tick pilih nama ACAK dari pool (bukan berurutan)
   overlayInterval = setInterval(() => {
-    overlayIndex = (overlayIndex + 1) % participants.length;
-    const p = participants[overlayIndex];
-    els.overlayId.textContent = p ? first5(p.name) : "--";
+    els.overlayId.textContent = pickRandom();
   }, 80);
 }
 
@@ -267,19 +524,77 @@ function stopOverlaySpin(finalName) {
 // Satu kali putaran penuh: spin -> tangkap pemenang -> simpan ke DB -> update UI
 // ---------------------------------------------------------------------------
 async function spinOnceAndRecord(prizeId, roundNumber) {
-  if (participants.length === 0)
-    throw new Error("Semua peserta sudah pernah menang.");
+  const prize = prizes.find((p) => p.id === Number(prizeId));
+  const grand = isGrandPrize(prize);
 
-  const resultPromise = waitForSpinResult();
-  // start overlay animation while wheel spins
-  try {
-    startOverlaySpin();
-  } catch (e) {
-    console.warn("overlay start failed", e);
+  // 1) Bangun pool: kalau GRANDPRIZE -> HANYA peserta PROPER.
+  const eligiblePool = getEligiblePool(prizeId);
+
+  if (eligiblePool.length === 0) {
+    // Bukan error — cukup info, dan tandai agar batch berhenti dengan tenang.
+    return {
+      ok: false,
+      reason: grand
+        ? "Semua peserta PROPER sudah mendapat hadiah."
+        : "Semua peserta sudah mendapat hadiah.",
+    };
   }
-  postToWheel({ name: "spin" });
-  const winnerName = await resultPromise; // <-- ini nama pemenang yang diambil dari event spinResult wheel
 
+  // 2) Kirim HANYA nama yang eligible ke wheelofnames, lalu tunggu roda
+  //    selesai render ulang sebelum diputar. Ini yang menjamin roda hanya
+  //    berisi peserta PROPER saat hadiah GRANDPRIZE.
+  const eligibleNames = eligiblePool.map((p) => p.name);
+  setWheelEntries(eligibleNames);
+  await new Promise((r) =>
+    setTimeout(r, eligibleNames.length > 200 ? 800 : 350),
+  );
+
+  const eligibleSet = new Set(eligibleNames);
+
+  // 3) Putar roda. Kalau (karena timing iframe) hasilnya ternyata di luar pool,
+  //    ulangi diam-diam — tanpa menampilkan error apa pun ke operator.
+  let winnerName = null;
+  for (let attempt = 0; attempt < 5 && winnerName === null; attempt++) {
+    if (attempt > 0) {
+      // kirim ulang entries eligible sebelum coba lagi
+      setWheelEntries(eligibleNames);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    try {
+      startOverlaySpin();
+    } catch (e) {
+      console.warn("overlay start failed", e);
+    }
+
+    let result = null;
+    try {
+      const resultPromise = waitForSpinResult();
+      postToWheel({ name: "spin" });
+      result = await resultPromise;
+    } catch (e) {
+      console.warn("spin attempt gagal/timeout, coba lagi:", e.message);
+      continue; // timeout -> coba lagi, jangan tampilkan error
+    }
+
+    if (eligibleSet.has(result)) {
+      winnerName = result;
+    } else {
+      console.warn(
+        `Hasil roda "${result}" di luar pool eligible, mengulang spin...`,
+      );
+    }
+  }
+
+  // 4) Fallback terakhir (sangat jarang): pilih acak dari pool eligible sendiri,
+  //    supaya undian tetap jalan dan tidak pernah menampilkan error.
+  if (winnerName === null) {
+    winnerName =
+      eligibleNames[Math.floor(Math.random() * eligibleNames.length)];
+    console.warn("Fallback: pemenang dipilih acak dari pool eligible.");
+  }
+
+  // 5) Simpan ke database
   const res = await fetch("/api/spin-result", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -289,32 +604,37 @@ async function spinOnceAndRecord(prizeId, roundNumber) {
       round_number: roundNumber,
     }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Gagal menyimpan pemenang");
 
-  // Update state lokal: hapus pemenang dari daftar peserta di wheel
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    console.error("Gagal menyimpan pemenang:", data.error);
+    return { ok: false, reason: data.error || "Gagal menyimpan pemenang." };
+  }
+
+  // winner_id dipakai supaya baris pemenang ini langsung punya tombol hapus
+  const saved = await res.json().catch(() => ({}));
+
+  // 6) Update state lokal
   participants = participants.filter((p) => p.name !== winnerName);
-  postToWheel({ name: "removeWinner" });
-  // stop overlay dan tampilkan 5 huruf pertama nama pemenang
+  refreshWheelForSelectedPrize();
+
   try {
     stopOverlaySpin(winnerName);
   } catch (e) {
     console.warn("overlay stop failed", e);
   }
 
-  // Update stok hadiah lokal
-  const prize = prizes.find((p) => p.id === Number(prizeId));
   const prizeName = prize ? prize.name : "Hadiah";
   if (prize) {
     prize.stock -= 1;
     refreshPrizeSelectStock(prizeId, prize.stock);
   }
 
-  addWinnerToList(winnerName, prizeName);
-  setLastWinnerBadge(winnerName); // <-- tampilkan nama pemenang terbaru di pojok kanan bawah wheel
+  addWinnerToList(winnerName, prizeName, saved.winner_id);
+  setLastWinnerBadge(winnerName);
   refreshStats();
 
-  return { winnerName, prizeName };
+  return { ok: true, winnerName, prizeName };
 }
 
 // ---------------------------------------------------------------------------
@@ -329,10 +649,17 @@ els.btnSpinOnce.addEventListener("click", async () => {
   toggleButtons(false);
   setStatus("Memutar wheel...");
   try {
-    const { winnerName, prizeName } = await spinOnceAndRecord(prizeId, 1);
-    setStatus(`${winnerName} menang: ${prizeName}`);
+    const result = await spinOnceAndRecord(prizeId, 1);
+    if (result.ok) {
+      setStatus(`${result.winnerName} menang: ${result.prizeName}`);
+    } else {
+      // bukan error merah, cukup informasi biasa
+      setStatus(result.reason);
+    }
   } catch (err) {
-    setStatus(err.message, true);
+    // tidak seharusnya terjadi; jangan tampilkan error mentah ke layar
+    console.error(err);
+    setStatus("Silakan coba putar lagi.");
   } finally {
     isSpinning = false;
     toggleButtons(true);
@@ -344,8 +671,8 @@ els.btnSpinOnce.addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 els.btnSpinBatch.addEventListener("click", async () => {
   if (isSpinning) return;
-  const prizeId = els.prizeSelect.value;
-  if (!prizeId) return setStatus("Pilih hadiah terlebih dahulu.", true);
+  if (!els.prizeSelect.value)
+    return setStatus("Pilih hadiah terlebih dahulu.", true);
 
   isSpinning = true;
   toggleButtons(false);
@@ -357,27 +684,41 @@ els.btnSpinBatch.addEventListener("click", async () => {
     els.progressLabel.textContent = `Ronde ${round} / ${spinCount}`;
     els.progressFill.style.width = `${((round - 1) / spinCount) * 100}%`;
 
+    const prizeId = els.prizeSelect.value;
     const prize = prizes.find((p) => p.id === Number(prizeId));
+
+    // --- STOK HABIS -> BERHENTI (tidak lanjut ke hadiah berikutnya) ---
     if (!prize || prize.stock <= 0) {
       setStatus(
-        "Stok hadiah ini sudah habis, undian otomatis dihentikan.",
-        true,
+        `Stok ${prize ? prize.name : "hadiah ini"} sudah habis. Undian dihentikan.`,
       );
       break;
     }
-    if (participants.length === 0) {
-      setStatus("Semua peserta sudah mendapat hadiah.", true);
+
+    // Tidak ada lagi peserta yang memenuhi syarat -> berhenti juga
+    if (getEligiblePool(prizeId).length === 0) {
+      const label = isGrandPrize(prize) ? "peserta PROPER" : "peserta";
+      setStatus(`Semua ${label} sudah mendapat hadiah. Undian dihentikan.`);
       break;
     }
 
+    setStatus(`Memutar wheel... (ronde ${round} - ${prize.name})`);
+
+    let result;
     try {
-      setStatus(`Memutar wheel... (ronde ${round})`);
-      const { winnerName, prizeName } = await spinOnceAndRecord(prizeId, round);
-      setStatus(`Ronde ${round}: ${winnerName} menang ${prizeName}`);
+      result = await spinOnceAndRecord(prizeId, round);
     } catch (err) {
-      setStatus(`Ronde ${round} gagal: ${err.message}`, true);
+      console.error(err);
+      result = { ok: false, reason: "Terjadi gangguan, undian dihentikan." };
+    }
+
+    if (!result.ok) {
+      setStatus(result.reason); // info biasa, bukan error merah
       break;
     }
+    setStatus(
+      `Ronde ${round}: ${result.winnerName} menang ${result.prizeName}`,
+    );
 
     // jeda singkat supaya event wheel settle sebelum spin berikutnya
     await new Promise((r) => setTimeout(r, 250));
