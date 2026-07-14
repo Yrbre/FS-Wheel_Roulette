@@ -152,21 +152,23 @@ body {
    terpisah dari overlay ID di tengah supaya posisinya konsisten. */
 .last-winner-badge {
   position: absolute;
-  right: 14px;
   bottom: 14px;
+  left: 14px; /* pakai 0 kalau mau benar-benar mepet tepi iframe */
+  right: 14px; /* keduanya diisi -> badge meregang penuh */
+  /* transform & max-width DIHAPUS, sudah tidak perlu */
+
   z-index: 6;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center; /* isi ditengahkan horizontal */
   gap: 2px;
-  max-width: 100%;
-  padding: 8px 12px;
+  padding: 10px 12px;
   border-radius: 12px;
   background: rgba(14, 16, 36, 0.82);
   border: 1px solid rgba(242, 184, 7, 0.35);
   backdrop-filter: blur(4px);
   pointer-events: none;
-  text-align: right;
+  text-align: center;
 }
 
 .last-winner-badge__label {
@@ -178,13 +180,19 @@ body {
 
 .last-winner-badge__name {
   font-family: "Sora", sans-serif;
-  font-size: 20px;
+  font-size: 26px;
   font-weight: 800;
   color: var(--gold-soft);
+
+  /* Untuk ellipsis, elemen HARUS block/inline-block — bukan flex.
+     `display: flex` justru membatalkan text-overflow. */
+  display: block;
+  width: 100%;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 70vh;
+  text-align: center;
 }
 
 @media (max-width: 500px) {
