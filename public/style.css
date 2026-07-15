@@ -78,7 +78,7 @@ body {
   align-items: stretch; /* kedua kartu sama tinggi -> batas bawah sejajar */
   gap: 24px;
   padding: 28px 20px 40px;
-  max-width: 1600px;
+  max-width: 2000px;
   margin: 0 auto;
 }
 
@@ -129,17 +129,17 @@ body {
 }
 
 .overlay-id {
-  width: 96px;
-  height: 96px;
+  width: 120px;
+  height: 120px;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.7);
   border: 2px solid rgba(0, 0, 0, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
+  font-weight: 1000;
   color: var(--gold-soft);
-  font-size: 18px;
+  font-size: 40px;
   text-align: center;
   transform-origin: center center;
 }
@@ -180,7 +180,7 @@ body {
 
 .last-winner-badge__name {
   font-family: "Sora", sans-serif;
-  font-size: 26px;
+  font-size: 32px;
   font-weight: 800;
   color: var(--gold-soft);
 
@@ -367,7 +367,7 @@ select {
 
 .winners-panel h2 {
   font-family: "Sora", sans-serif;
-  font-size: 16px;
+  font-size: 24px;
   margin: 0 0 14px;
 }
 
@@ -417,7 +417,7 @@ select {
   padding: 10px 12px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.04);
-  font-size: 13px;
+  font-size: 20px;
 }
 
 .winners-list li .w-name {
@@ -454,7 +454,7 @@ select {
 
 .winners-list li .w-info .w-prize {
   color: var(--gold-soft);
-  font-size: 12px;
+  font-size: 32px;
 }
 
 .w-delete {
@@ -505,7 +505,7 @@ select {
 
 .winners-group__title {
   font-family: "Sora", sans-serif;
-  font-size: 12px;
+  font-size: 24px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;

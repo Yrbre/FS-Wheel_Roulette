@@ -3,7 +3,7 @@ const BATCH_SIZE = 10; // jumlah putaran otomatis sekali klik
 
 // Maksimal pemenang yang DITAMPILKAN di panel kanan (yang terbaru dulu),
 // supaya tidak perlu scroll jauh. Data lama tetap tersimpan di database.
-const MAX_WINNERS_DISPLAYED = 53;
+const MAX_WINNERS_DISPLAYED = 60;
 
 const els = {
   frame: document.getElementById("wheelFrame"),
@@ -342,7 +342,7 @@ async function loadData() {
     prizes = prizeRes;
 
     // Fetch winners - ambil batch pertama
-    const winnersRes = await fetch("/api/winners?page=1&limit=50").then((r) =>
+    const winnersRes = await fetch("/api/winners?page=1&limit=60").then((r) =>
       r.json(),
     );
     const winnersData = winnersRes.data || winnersRes;
